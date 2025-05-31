@@ -1,0 +1,223 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Live USA Presidential Election Map 1984</title>
+  <!-- Including prop-types first -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prop-types/15.8.1/prop-types.min.js"></script>
+  <!-- React and dependencies -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+  <!-- PapaParse for CSV parsing (if needed for fallback) -->
+  <script src="https://unpkg.com/papaparse@latest/papaparse.min.js"></script>
+  <!-- Chrono for date parsing (not used here but included for robustness) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/chrono-node/1.3.11/chrono.min.js"></script>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Recharts for visualization -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/recharts/2.15.0/Recharts.min.js"></script>
+  <style>
+    body {
+      font-family: 'Arial', sans-serif;
+      background-color: #f3f4f6;
+      margin: 0;
+      padding: 0;
+    }
+    #root {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    // Defining the main React component
+    const { useState, useEffect } = React;
+
+    // SVG path data for US states (simplified for brevity, use a full GeoJSON or SVG paths in production)
+    const usStates = [
+      { id: 'AL', path: 'M 350 400 L 360 400 L 360 410 L 350 410 Z', name: 'ALABAMA' },
+      { id: 'AK', path: 'M 50 450 L 60 450 L 60 460 L 50 460 Z', name: 'ALASKA' },
+      // Add paths for other states (use a library like D3 or GeoJSON for accurate paths)
+      // For brevity, only AL and AK are shown; replace with full SVG paths
+    ];
+
+    const ElectionMap = () => {
+      const [data, setData] = useState([]);
+      const [loading, setLoading] = useState(true);
+      const [selectedState, setSelectedState] = useState(null);
+
+      // Fetching data from Google Sheets API
+      useEffect(() => {
+        const apiKey = 'YOUR_GOOGLE_API_KEY'; // Replace with your Google API key
+        const sheetId = 'YOUR_SHEET_ID'; // Replace with your Google Sheet ID
+        const range = 'Sheet1!A1:Q';
+        const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${range}?key=${apiKey}`;
+
+        fetch(url)
+          .then(response => response.json())
+          .then(result => {
+            const rows = result.values;
+            const headers = rows[0];
+            const cleanedData = rows.slice(1).map(row => {
+              const rowData = {};
+              headers.forEach((header, i) => {
+                rowData[header.trim().replace(/^"|"$/g, '')] = row[i] ? row[i].trim().replace(/^"|"$/g, '') : '';
+              });
+              return rowData;
+            }).filter(row => row['STATES'] && row['TOTAL VOTES'] && !isNaN(parseFloat(row['TOTAL VOTES'])));
+            setData(cleanedData);
+            setLoading(false);
+          })
+          .catch(error => {
+            console.error('Error fetching Google Sheet data:', error);
+            setLoading(false);
+          });
+      }, []);
+
+      // Handling state click
+      const handleStateClick = (state) => {
+        setSelectedState(state);
+      };
+
+      // Rendering the map and details
+      if (loading) {
+        return (
+          <div className="text-center text-xl text-gray-600 mt-10">
+            Loading election data...
+          </div>
+        );
+      }
+
+      return (
+        <div className="bg-white shadow-lg rounded-lg p-6">
+          <h1 className="text-3xl font-bold text-center mb-6 text-blue-800">
+            1984 USA Presidential Election Map
+          </h1>
+          {/* Rendering the SVG map with Recharts */}
+          <Recharts.ResponsiveContainer width="100%" height={600}>
+            <Recharts.ScatterChart margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
+              <Recharts.CartesianGrid stroke="#e5e7eb" />
+              <Recharts.XAxis type="number" dataKey="x" hide />
+              <Recharts.YAxis type="number" dataKey="y" hide />
+              <Recharts.Scatter
+                data={usStates.map(state => {
+                  const stateData = data.find(d => d.ABBREVIATIONS === state.id) || {};
+                  const winner = stateData.WINNER || 'Unknown';
+                  const fill = winner.includes('Jay Rockefeller') ? '#B82D35' : winner.includes('Democrat') ? '#2A71AE' : '#d1d5db';
+                  return { ...state, x: 0, y: 0, fill };
+                })}
+                shape={(props) => {
+                  const { payload, cx, cy } = props;
+                  return (
+                    <path
+                      d={payload.path}
+                      fill={payload.fill}
+                      stroke="#000"
+                      strokeWidth="0.5"
+                      onClick={() => handleStateClick(payload)}
+                      style={{ cursor: 'pointer' }}
+                    />
+                  );
+                }}
+              />
+              <Recharts.Tooltip
+                content={({ payload }) => {
+                  if (payload && payload[0]) {
+                    const stateData = data.find(d => d.ABBREVIATIONS === payload[0].payload.id) || {};
+                    return (
+                      <div className="bg-white p-4 border rounded shadow">
+                        <h3 className="font-bold">{stateData.STATES || 'Unknown'}</h3>
+                        <p>Winner: {stateData.WINNER || 'N/A'}</p>
+                        <p>Electoral Votes: {stateData['ELECTORAL VOTES'] || 'N/A'}</p>
+                        <p>GOP Votes: {stateData['GOP VOTES'] || 'N/A'}</p>
+                        <p>DNC Votes: {stateData['DNC VOTES'] || 'N/A'}</p>
+                        <p>Republican Vote Share: {stateData['REPUBLICAN VOTE SHARE'] || 'N/A'}</p>
+                        <p>Democrat Vote Share: {stateData['DEMOCRAT VOTE SHARE'] || 'N/A'}</p>
+                      </div>
+                    );
+                  }
+                  return null;
+                }}
+              />
+            </Recharts.ScatterChart>
+          </Recharts.ResponsiveContainer>
+          {/* Displaying selected state details */}
+          {selectedState && (
+            <div className="mt-6 p-4 bg-gray-100 rounded-lg">
+              <h2 className="text-xl font-semibold text-gray-800">
+                {data.find(d => d.ABBREVIATIONS === selectedState.id)?.STATES || selectedState.name}
+              </h2>
+              <p className="text-gray-600">
+                Winner: {data.find(d => d.ABBREVIATIONS === selectedState.id)?.WINNER || 'N/A'}
+              </p>
+              <p className="text-gray-600">
+                Electoral Votes: {data.find(d => d.ABBREVIATIONS === selectedState.id)?.['ELECTORAL VOTES'] || 'N/A'}
+              </p>
+              <p className="text-gray-600">
+                GOP Votes: {data.find(d => d.ABBREVIATIONS === selectedState.id)?.['GOP VOTES'] || 'N/A'}
+              </p>
+              <p className="text-gray-600">
+                DNC Votes: {data.find(d => d.ABBREVIATIONS === selectedState.id)?.['DNC VOTES'] || 'N/A'}
+              </p>
+              <p className="text-gray-600">
+                Republican Vote Share: {data.find(d => d.ABBREVIATIONS === selectedState.id)?.['REPUBLICAN VOTE SHARE'] || 'N/A'}
+              </p>
+              <p className="text-gray-600">
+                Democrat Vote Share: {data.find(d => d.ABBREVIATIONS === selectedState.id)?.['DEMOCRAT VOTE SHARE'] || 'N/A'}
+              </p>
+            </div>
+          )}
+        </div>
+      );
+    };
+
+    // Rendering the component
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<ElectionMap />);
+  </script>
+</body>
+</html>
